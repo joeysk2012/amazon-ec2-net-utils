@@ -34,7 +34,6 @@ declare -i -r metric_base=512
 declare imds_endpoint=""
 declare imds_token=""
 declare imds_interface=""
-declare self_iface_name=""
 
 make_token_request() {
     local ep=${1:-""}
@@ -64,7 +63,7 @@ get_token() {
     # this operation for up to 30 seconds, but on subsequent
     # invocations we avoid retrying
     local deadline
-    local intf=$self_iface_name
+    local intf=${1:-""}
     deadline=$(date -d "now+30 seconds" +%s)
     local old_opts=$-
     
@@ -126,7 +125,6 @@ get_meta() {
     declare -i attempts=0
     debug "[get_meta] Querying IMDS for ${key}"
 
-    get_token
     if [[ -z $imds_endpoint || -z $imds_token || -z $imds_interface ]]; then
         error "[get_meta] Unable to obtain IMDS token, endpoint, or interface"
         return 1
@@ -522,7 +520,7 @@ setup_interface() {
     local -i device_number network_card rc
     iface=$1
     ether=$2
-    self_iface_name=$1
+    get_token "$iface"
 
     network_card=$(_get_network_card "$iface" "$ether")
     device_number=$(_get_device_number "$iface" "$ether" "$network_card")
