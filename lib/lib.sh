@@ -141,9 +141,8 @@ get_meta() {
     local key=$1
     local max_tries=${2:-10}
     declare -i attempts=0
-    if [ -v EC2_IF_INITIAL_SETUP ]; then
-        debug "[get_meta] Querying IMDS for ${key}"
-    fi
+
+    debug "[get_meta] Querying IMDS for ${key}"
 
     if [[ -z $imds_endpoint || -z $imds_token || -z $imds_interface ]]; then
         error "[get_meta] Unable to obtain IMDS token, endpoint, or interface"
@@ -152,17 +151,18 @@ get_meta() {
     local url="${imds_endpoint}/meta-data/${key}"
     local meta rc
     local curl_opts=(
-        -s 
-        --max-time 5 
-        -H "X-aws-ec2-metadata-token:${imds_token}" 
-        -f 
+        -sS
+        --max-time 5
+        -H "X-aws-ec2-metadata-token:${imds_token}"
+        -f
         -A "$USER_AGENT")
     if [[ "$imds_interface" != "$default_route" ]]; then
         curl_opts+=(--interface "$imds_interface")
     fi
 
     while [ $attempts -lt $max_tries ]; do
-        meta=$(curl "${curl_opts[@]}" "$url")
+        meta=$(curl "${curl_opts[@]}" "$url" \
+            2> >(logger --id=$$ --priority "${syslog_facility}.err" --tag "$syslog_tag"))
         rc=$?
         if [ $rc -eq 0 ]; then
             echo "$meta"
@@ -170,6 +170,12 @@ get_meta() {
         fi
         attempts+=1
     done
+
+    # Single-attempt callers query keys that may legitimately be absent
+    # don't log those.
+    if [ "$max_tries" -gt 1 ]; then
+        error "[get_meta] ${key} failed after ${max_tries} tries"
+    fi
     return 1
 }
 
@@ -233,19 +239,47 @@ _install_and_reload() {
     fi
 }
 
+# Fetch an IMDS key for a given MAC.
+# This is function validates that get_iface_imds 
+# returns without error and that the output has atleast one value.
+# When requesting local-ipv4 and subnets there should always be a value.
+# Output/status:
+#   rc=0, stdout=<raw IMDS body>  : success, non-empty response
+#   rc=1, stdout=(none)           : get_iface_imds failed or body was empty.
+get_and_validate_imds() {
+    local mac=$1
+    local key=$2
+    local output
+    if ! output=$(get_iface_imds "$mac" "$key"); then
+        error "get_iface_imds failed for ${mac} (${key})"
+        return 1
+    fi
+    if [[ -z "$output" ]]; then
+        error "${key} returned empty for ${mac}"
+        return 1
+    fi
+    echo "$output"
+}
+
 create_ipv4_aliases() {
     local iface=$1
     local mac=$2
-    local addresses
+    local all_addresses secondary_addresses
     subnet_supports_ipv4 "$iface" || return 0
-    addresses=$(get_iface_imds $mac local-ipv4s | tail -n +2 | sort)
+    if ! all_addresses=$(get_and_validate_imds "$mac" local-ipv4s); then
+        debug "unable to get local-ipv4s for ${iface}, skipping"
+        return 0
+    fi
+
+    secondary_addresses=$(echo "$all_addresses" | tail -n +2 | sort)
+
     local drop_in_dir="${unitdir}/70-${iface}.network.d"
     mkdir -p "$drop_in_dir"
     local file="$drop_in_dir/ec2net_alias.conf"
     local work="${file}.new"
     touch "$work"
 
-    for a in $addresses; do
+    for a in $secondary_addresses; do
         cat <<EOF >> "$work"
 [Address]
 Address=${a}/32
@@ -274,21 +308,31 @@ subnet_supports_ipv6() {
     ip -6 addr show dev "$iface" scope global | grep -q inet6
 }
 
-subnet_prefixroutes() {
+# Every attached ENI's subnet has at least one CIDR block for the
+# families we call this with.
+# An empty/failed response here is always a genuine error or
+# propagation delay, never a legitimate empty state.
+#
+# Output/status:
+#   rc=0, stdout=<raw IMDS body>  : success, non-empty response
+#   rc=1, stdout=(none)           : get_iface_imds failed (logged via error), or body is empty.
+subnet_routes() {
     local ether=$1
     local family=${2:-ipv4}
     if [ -z "$ether" ]; then
         error "${FUNCNAME[0]} called without an MAC address"
         return 1
     fi
+    local key
     case "$family" in
         ipv4)
-            get_iface_imds "$ether" "subnet-${family}-cidr-block"
+            key="subnet-${family}-cidr-block"
             ;;
         ipv6)
-            get_iface_imds "$ether" "subnet-${family}-cidr-blocks"
+            key="subnet-${family}-cidr-blocks"
             ;;
     esac
+    get_and_validate_imds "$ether" "$key"
 }
 
 create_rules() {
@@ -324,12 +368,11 @@ create_rules() {
             ;;
     esac
 
-    # We'd like to retry here, but we can't distinguish between an
-    # IMDS failure, a propagation delay, or a legitimately empty
-    # response.
-    addrs=$(get_iface_imds ${ether} ${local_addr_key} || true)
-    if [[ -z "$addrs" ]]; then
-        debug "No addresses found for ${ether}"
+    # Every attached ENI has at least its own primary address in
+    # local-ipv4s/ipv6s, so an empty response here is always a
+    # genuine error or propagation delay, never legitimate.
+    if ! addrs=$(get_and_validate_imds "${ether}" "${local_addr_key}"); then
+        debug "create_rules: unable to get ${local_addr_key} for ${iface}, skipping"
         return 0
     fi
 
@@ -392,15 +435,23 @@ Table=${tableid}
 Gateway=_ipv6ra
 
 EOF
+    local -i have_routes=0
     if subnet_supports_ipv6 "$iface"; then
-        for dest in $(subnet_prefixroutes "$ether" ipv6); do
-            cat <<EOF >> "${dropin}.tmp"
+        local ipv6_routes
+        if ! ipv6_routes=$(subnet_routes "$ether" ipv6); then
+            error "unable to get subnet routes for ${iface} ipv6."
+        else
+            have_routes=1
+            local dest
+            for dest in $ipv6_routes; do
+                cat <<EOF >> "${dropin}.tmp"
 [Route]
 Table=${tableid}
 Destination=${dest}
 
 EOF
-        done
+            done
+        fi
     fi
     if subnet_supports_ipv4 "$iface"; then
         # if not in a v6-only network, add IPv4 routes to the private table
@@ -409,19 +460,34 @@ EOF
 Gateway=_dhcp4
 Table=${tableid}
 EOF
-        local dest
-        for dest in $(subnet_prefixroutes "$ether" ipv4); do
-            cat <<EOF >> "${dropin}.tmp"
+        local ipv4_routes
+        if ! ipv4_routes=$(subnet_routes "$ether" ipv4); then
+            error "unable to get subnet routes for ${iface} ipv4"
+        else
+            have_routes=1
+            local dest
+            for dest in $ipv4_routes; do
+                cat <<EOF >> "${dropin}.tmp"
 [Route]
 Table=${tableid}
 Destination=${dest}
 EOF
-        done
+            done
+        fi
     fi
 
 
     mv "${dropin}.tmp" "$dropin"
-    echo 1
+
+    # There is an issue where ipv6 only subnets 
+    # take a longer propagation time than ipv4 subnets.
+    # If we echo 0, we will retry again to get this subnet in the next loop.
+    # For intitial boot/udev, we don't want this as it might delay config setup.
+    if [ -v EC2_IF_INITIAL_SETUP ] || [ $have_routes -eq 1 ]; then
+        echo 1
+    else
+        echo 0
+    fi
 }
 
 add_altnames() {
