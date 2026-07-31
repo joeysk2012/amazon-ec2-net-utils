@@ -1,3 +1,6 @@
+[Unit]
+BindsTo=policy-routes@%i.service
+
 [Timer]
 OnActiveSec=30
 OnUnitInactiveSec=60
