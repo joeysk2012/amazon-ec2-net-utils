@@ -70,12 +70,22 @@ start)
     do_setup
     ;;
 remove)
-    register_networkd_reloader
+    # Clean up stale 70-<iface>.network config left behind when an ENI
+    # renames on re-attach (ens6 -> ens7, amazon-ec2-net-utils#166).
+    # Do not networkd reload/reconfigure here: the link is already gone by
+    # the time this runs, and a global reload would reset conntrack for
+    # unrelated interfaces (the regression fixed in: 
+    # https://github.com/amazonlinux/amazon-ec2-net-utils/pull/107/changes/c35c4d504fea196af3aa4a00c84b17fa54657d9e).
+    # In addtion, this code also runs during upgrade, only run this when sysfs node is not present.
+    # This means that it's an actual detach rather than a restart.
+    if [ -e "/sys/class/net/${iface}" ]; then
+        debug "Link ${iface} still present, skipping configuration removal."
+        exit 0
+    fi
     debug "Removing configuration for $iface."
     rm -rf "/run/network/$iface" \
        "${unitdir}/70-${iface}.network" \
        "${unitdir}/70-${iface}.network.d" || true
-    touch "$reload_flag"
     ;;
 stop|cleanup)
     # this is a no-op, only supported for compatibility

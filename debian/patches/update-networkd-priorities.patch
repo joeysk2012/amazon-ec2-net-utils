@@ -1,29 +1,38 @@
-From 162c8b20ab93ae22fa0c22816d4fd25ff005221b Mon Sep 17 00:00:00 2001
+From a47a84f257b588beef06ee04352f02e9deeb856e Mon Sep 17 00:00:00 2001
 From: Joe Kurokawa <joekurok@amazon.com>
 Date: Wed, 3 Sep 2025 01:39:29 +0000
 Subject: [PATCH] change the priority of the networkd configs
 
 ensure they're order before netplan
 ---
- bin/setup-policy-routes.sh | 4 ++--
+ bin/setup-policy-routes.sh | 6 +++---
  lib/lib.sh                 | 6 +++---
- 2 files changed, 5 insertions(+), 5 deletions(-)
+ 2 files changed, 6 insertions(+), 6 deletions(-)
 
 diff --git a/bin/setup-policy-routes.sh b/bin/setup-policy-routes.sh
-index 23f7d98..f89d827 100755
+index 5c4be18..4beefff 100755
 --- a/bin/setup-policy-routes.sh
 +++ b/bin/setup-policy-routes.sh
-@@ -73,8 +73,8 @@ remove)
-     register_networkd_reloader
+@@ -70,7 +70,7 @@ start)
+     do_setup
+     ;;
+ remove)
+-    # Clean up stale 70-<iface>.network config left behind when an ENI
++    # Clean up stale 07-<iface>.network config left behind when an ENI
+     # renames on re-attach (ens6 -> ens7, amazon-ec2-net-utils#166).
+     # Do not networkd reload/reconfigure here: the link is already gone by
+     # the time this runs, and a global reload would reset conntrack for
+@@ -84,8 +84,8 @@ remove)
+     fi
      debug "Removing configuration for $iface."
      rm -rf "/run/network/$iface" \
 -       "${unitdir}/70-${iface}.network" \
 -       "${unitdir}/70-${iface}.network.d" || true
 +       "${unitdir}/07-${iface}.network" \
 +       "${unitdir}/07-${iface}.network.d" || true
-     touch "$reload_flag"
      ;;
  stop|cleanup)
+     # this is a no-op, only supported for compatibility
 diff --git a/lib/lib.sh b/lib/lib.sh
 index a794ca0..603c522 100644
 --- a/lib/lib.sh
@@ -55,5 +64,3 @@ index a794ca0..603c522 100644
      if [ -e "$cfgfile" ] &&
             [ ! -v EC2_IF_INITIAL_SETUP ]; then
          echo $retval
--- 
-2.47.3
