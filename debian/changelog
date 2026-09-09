@@ -1,3 +1,15 @@
+amazon-ec2-net-utils (2.7.7) unstable; urgency=medium
+
+  * New upstream release 2.7.7
+
+ -- Joe Kurokawa <joekurok@amazon.com>  Wed, 8 Sep 2026 03:10:00 +0000
+
+amazon-ec2-net-utils (2.7.6) unstable; urgency=medium
+
+  * New upstream release 2.7.6
+
+ -- Joe Kurokawa <joekurok@amazon.com>  Thu, 23 Jul 2026 21:51:00 +0000
+
 amazon-ec2-net-utils (2.7.5) unstable; urgency=medium
 
   * New upstream release 2.7.5
