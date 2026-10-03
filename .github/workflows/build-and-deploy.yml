@@ -27,7 +27,7 @@ jobs:
         id: start-build
         run: |
           BUILD_ID=$(aws codebuild start-build \
-            --project-name myapp-rpm-build \
+            --project-name amazon-ec2-net-utils-build \
             --source-version ${{ github.event.pull_request.head.sha || github.sha }} \
             --query 'build.id' --output text)
           echo "build-id=$BUILD_ID" >> "$GITHUB_OUTPUT"
