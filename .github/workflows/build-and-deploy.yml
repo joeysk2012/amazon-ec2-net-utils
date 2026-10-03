@@ -1,0 +1,79 @@
+name: Build RPM and Deploy
+
+on:
+  pull_request:
+    branches: [develop]
+  push:
+    branches: [develop]
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      build-id: ${{ steps.start-build.outputs.build-id }}
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::448049812746:role/GitHubActionsDeployRole
+          aws-region: us-west-2
+
+      - name: Start CodeBuild
+        id: start-build
+        run: |
+          BUILD_ID=$(aws codebuild start-build \
+            --project-name myapp-rpm-build \
+            --source-version ${{ github.event.pull_request.head.sha || github.sha }} \
+            --query 'build.id' --output text)
+          echo "build-id=$BUILD_ID" >> "$GITHUB_OUTPUT"
+          echo "Started build: $BUILD_ID"
+
+      - name: Wait for build to complete
+        run: |
+          BUILD_ID="${{ steps.start-build.outputs.build-id }}"
+          while true; do
+            STATUS=$(aws codebuild batch-get-builds --ids "$BUILD_ID" \
+              --query 'builds[0].buildStatus' --output text)
+            echo "Build status: $STATUS"
+            if [[ "$STATUS" == "SUCCEEDED" ]]; then
+              break
+            elif [[ "$STATUS" =~ ^(FAILED|FAULT|STOPPED|TIMED_OUT)$ ]]; then
+              echo "Build failed with status: $STATUS"
+              exit 1
+            fi
+            sleep 15
+          done
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::448049812746:role/GitHubActionsDeployRole
+          aws-region: us-west-2
+
+      - name: Get build artifact location
+        id: artifact
+        run: |
+          BUILD_ID="${{ needs.build.outputs.build-id }}"
+          LOCATION=$(aws codebuild batch-get-builds --ids "$BUILD_ID" \
+            --query 'builds[0].artifacts.location' --output text)
+          S3_PATH=$(echo "$LOCATION" | sed 's|arn:aws:s3:::||')
+          BUCKET=$(echo "$S3_PATH" | cut -d'/' -f1)
+          KEY=$(echo "$S3_PATH" | cut -d'/' -f2-)
+          echo "bucket=$BUCKET" >> "$GITHUB_OUTPUT"
+          echo "key=$KEY" >> "$GITHUB_OUTPUT"
+
+      - name: Trigger CodeDeploy
+        run: |
+          aws deploy create-deployment \
+            --application-name amazon-ec2-net-utils \
+            --deployment-group-name amazon-ec2-net-utils-test \
+            --s3-location bucket=${{ steps.artifact.outputs.bucket }},key=${{ steps.artifact.outputs.key }},bundleType=zip
