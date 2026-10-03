@@ -8,8 +8,8 @@ phases:
   pre_build:
     commands:
       - echo "Ensuring full git history and tags are available for git describe"
-      - git rev-parse --is-shallow-repository | grep -q true && git fetch --unshallow --tags || git fetch --tags
-      - git describe --dirty --tags || echo "WARNING: git describe failed, scratch-rpm version may be wrong"
+      - "git rev-parse --is-shallow-repository | grep -q true && git fetch --unshallow --tags || git fetch --tags"
+      - "git describe --dirty --tags || echo 'WARNING: git describe failed, scratch-rpm version may be wrong'"
 
   build:
     commands:
