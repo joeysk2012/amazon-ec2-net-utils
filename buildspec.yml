@@ -15,6 +15,8 @@ phases:
     commands:
       - echo "Ensuring full git history and tags are available for git describe"
       - "git rev-parse --is-shallow-repository | grep -q true && git fetch --unshallow --tags || git fetch --tags"
+      - echo "Explicitly fetching tags in case CodeBuild's checkout did not include them"
+      - "git fetch origin --tags --force"
       - "git describe --dirty --tags || echo 'WARNING: git describe failed, scratch-rpm version may be wrong'"
 
   build:
