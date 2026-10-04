@@ -11,20 +11,18 @@ phases:
       - chmod +x /usr/local/bin/shellcheck
       - shellcheck --version
 
-  pre_build:
-    commands:
-      - echo "Ensuring full git history and tags are available for git describe"
-      - "git rev-parse --is-shallow-repository | grep -q true && git fetch --unshallow --tags || git fetch --tags"
-      - echo "Explicitly fetching tags in case CodeBuild's checkout did not include them"
-      - "git fetch origin --tags --force"
-      - "git describe --dirty --tags || echo 'WARNING: git describe failed, scratch-rpm version may be wrong'"
-
   build:
     commands:
       - echo "Running shellcheck via make check"
       - make check
-      - echo "Building scratch RPM from current checkout"
-      - make scratch-rpm
+      - echo "Reading version from GNUmakefile"
+      - PKG_VERSION=$(grep -m1 '^version=' GNUmakefile | cut -d= -f2)
+      - echo "version=${PKG_VERSION}"
+      - echo "Generating source tarball"
+      - tar czf "../amazon-ec2-net-utils-${PKG_VERSION}.tar.gz" --exclude=.git
+          --transform "s,^./,./amazon-ec2-net-utils-${PKG_VERSION}/,g" .
+      - echo "Building RPM"
+      - rpmbuild -D "_sourcedir $(pwd)/.." -D "_rpmdir $(pwd)/RPMS" -bb amazon-ec2-net-utils.spec
 
   post_build:
     commands:
