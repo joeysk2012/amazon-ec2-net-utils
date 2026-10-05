@@ -3,20 +3,26 @@ version: 0.2
 phases:
   install:
     commands:
-      - dnf -y install make rpm-build shellcheck git
-
-  pre_build:
-    commands:
-      - echo "Ensuring full git history and tags are available for git describe"
-      - git rev-parse --is-shallow-repository | grep -q true && git fetch --unshallow --tags || git fetch --tags
-      - git describe --dirty --tags || echo "WARNING: git describe failed, scratch-rpm version may be wrong"
+      - dnf -y install make rpm-build git tar xz
+      - echo "Installing shellcheck (not available via dnf on AL2023)"
+      - curl -sSL "https://github.com/koalaman/shellcheck/releases/download/stable/shellcheck-stable.linux.x86_64.tar.xz" -o /tmp/shellcheck.tar.xz
+      - tar -xJf /tmp/shellcheck.tar.xz -C /tmp
+      - cp /tmp/shellcheck-stable/shellcheck /usr/local/bin/shellcheck
+      - chmod +x /usr/local/bin/shellcheck
+      - shellcheck --version
 
   build:
     commands:
       - echo "Running shellcheck via make check"
       - make check
-      - echo "Building scratch RPM from current checkout"
-      - make scratch-rpm
+      - echo "Reading version from GNUmakefile"
+      - PKG_VERSION=$(grep -m1 '^version=' GNUmakefile | cut -d= -f2)
+      - echo "version=${PKG_VERSION}"
+      - echo "Generating source tarball"
+      - tar czf "../amazon-ec2-net-utils-${PKG_VERSION}.tar.gz" --exclude=.git
+          --transform "s,^./,./amazon-ec2-net-utils-${PKG_VERSION}/,g" .
+      - echo "Building RPM"
+      - rpmbuild -D "_sourcedir $(pwd)/.." -D "_rpmdir $(pwd)/RPMS" -bb amazon-ec2-net-utils.spec
 
   post_build:
     commands:
