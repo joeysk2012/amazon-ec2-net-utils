@@ -1,4 +1,4 @@
-name: Build RPM and Deploy
+name: AWS Codepipeline Build RPM and Deploy
 
 on:
   pull_request:
