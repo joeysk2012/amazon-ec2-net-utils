@@ -21,13 +21,17 @@ phases:
       - echo "Generating source tarball"
       - tar czf "../amazon-ec2-net-utils-${PKG_VERSION}.tar.gz" --exclude=.git
           --transform "s,^./,./amazon-ec2-net-utils-${PKG_VERSION}/,g" .
+      - echo "Setting unique Release using CodeBuild build number ${CODEBUILD_BUILD_NUMBER}"
+      - sed -i "s,^Release:.*,Release: ${CODEBUILD_BUILD_NUMBER}%{?dist}," amazon-ec2-net-utils.spec
+      - grep '^Release:' amazon-ec2-net-utils.spec
       - echo "Building RPM"
       - rpmbuild -D "_sourcedir $(pwd)/.." -D "_rpmdir $(pwd)/RPMS" -bb amazon-ec2-net-utils.spec
 
   post_build:
     commands:
       - mkdir -p dist
-      - cp RPMS/*/*.rpm dist/
+      - echo "Renaming RPM to a fixed filename, since CodeDeploy's appspec files source does not support glob patterns"
+      - cp RPMS/*/*.rpm dist/app.rpm
       - cp -r .github/deploy/scripts dist/scripts
       - cp .github/deploy/appspec.yml dist/
 
