@@ -22,8 +22,8 @@ phases:
       - tar czf "../amazon-ec2-net-utils-${PKG_VERSION}.tar.gz" --exclude=.git
           --transform "s,^./,./amazon-ec2-net-utils-${PKG_VERSION}/,g" .
       - echo "Setting unique Release using CodeBuild build number ${CODEBUILD_BUILD_NUMBER}"
-      - sed -i "s,^Release:.*,Release: ${CODEBUILD_BUILD_NUMBER}%{?dist}," amazon-ec2-net-utils.spec
-      - grep '^Release:' amazon-ec2-net-utils.spec
+      - "sed -i \"s,^Release:.*,Release: ${CODEBUILD_BUILD_NUMBER}%{?dist},\" amazon-ec2-net-utils.spec"
+      - "grep '^Release:' amazon-ec2-net-utils.spec"
       - echo "Building RPM"
       - rpmbuild -D "_sourcedir $(pwd)/.." -D "_rpmdir $(pwd)/RPMS" -bb amazon-ec2-net-utils.spec
 
