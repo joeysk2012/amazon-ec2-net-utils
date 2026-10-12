@@ -31,7 +31,7 @@ iface="$1"
 mkdir -p "$runtimeroot"
 
 do_setup() {
-    echo "Hi from AWS code deploy."
+    echo "Hi from AWS code deploy!."
     ether=$(cat /sys/class/net/${iface}/address)
 
     declare -i changes=0
