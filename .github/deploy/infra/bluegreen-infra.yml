@@ -1,0 +1,418 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Blue/green deployment infrastructure for amazon-ec2-net-utils.
+  Creates one internet-facing ALB with four target groups and four Auto
+  Scaling Groups, one per target: AL2023 x86_64, AL2023 arm64,
+  AL2027-preview x86_64, AL2027-preview arm64. This lets CodeDeploy EC2
+  blue/green shift traffic between replacement ASGs per target.
+  This template provisions the PREREQUISITE infra only. The CodeDeploy
+  application + deployment groups are created in a later step.
+
+  Traffic routing on the single ALB (HTTP :80):
+    default          -> AL2023 x86_64
+    /al2023-arm64*   -> AL2023 arm64
+    /al2027*         -> AL2027 x86_64
+    /al2027-arm64*   -> AL2027 arm64
+
+Parameters:
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC in which to launch the ALB and Auto Scaling Groups.
+
+  SubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: >
+      At least two subnets in two different AZs (public, for an internet-facing ALB).
+
+  Al2023X86AmiId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
+    Description: Latest Amazon Linux 2023 x86_64 AMI (resolved from SSM Public Parameter).
+
+  Al2023Arm64AmiId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64
+    Description: Latest Amazon Linux 2023 arm64 AMI (resolved from SSM Public Parameter).
+
+  Al2027X86AmiId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/al2027-preview-ami-kernel-default-x86_64
+    Description: >
+      Latest Amazon Linux 2027 PREVIEW x86_64 AMI (resolved from SSM Public Parameter).
+      Preview OS - evaluation/testing only. Requires an x86-64-v3 processor
+      (t3.micro is compatible).
+
+  Al2027Arm64AmiId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/al2027-preview-ami-kernel-default-arm64
+    Description: >
+      Latest Amazon Linux 2027 PREVIEW arm64 AMI (resolved from SSM Public Parameter).
+      Preview OS - evaluation/testing only. Requires Graviton2 or later
+      (t4g.micro is compatible).
+
+  X86InstanceType:
+    Type: String
+    Default: t3.micro
+    Description: Instance type for x86_64 ASGs (must be x86-64-v3 for AL2027).
+
+  Arm64InstanceType:
+    Type: String
+    Default: t4g.micro
+    Description: Instance type for arm64 ASGs (must be Graviton2+ for AL2027).
+
+  AppName:
+    Type: String
+    Default: amazon-ec2-net-utils
+
+Resources:
+
+  # ---------- Security groups ----------
+  AlbSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: !Sub '${AppName} ALB - allow HTTP in'
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub '${AppName}-alb-sg'
+
+  InstanceSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: !Sub '${AppName} instances - allow HTTP from ALB'
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          SourceSecurityGroupId: !Ref AlbSecurityGroup
+      Tags:
+        - Key: Name
+          Value: !Sub '${AppName}-instance-sg'
+
+  # ---------- IAM for instances (CodeDeploy agent + SSM) ----------
+  InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ec2.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+        - arn:aws:iam::aws:policy/service-role/AmazonEC2RoleforAWSCodeDeploy
+      Tags:
+        - Key: Name
+          Value: !Sub '${AppName}-instance-role'
+
+  InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles: [ !Ref InstanceRole ]
+
+  # ---------- Load balancer ----------
+  LoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: !Sub '${AppName}-alb'
+      Scheme: internet-facing
+      Type: application
+      SecurityGroups: [ !Ref AlbSecurityGroup ]
+      Subnets: !Ref SubnetIds
+
+  # ---------- Target groups (one per target) ----------
+  Al2023X86TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub '${AppName}-al2023-x86-tg'
+      VpcId: !Ref VpcId
+      Protocol: HTTP
+      Port: 80
+      TargetType: instance
+      HealthCheckPath: /
+      HealthCheckProtocol: HTTP
+
+  Al2023Arm64TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub '${AppName}-al2023-arm64-tg'
+      VpcId: !Ref VpcId
+      Protocol: HTTP
+      Port: 80
+      TargetType: instance
+      HealthCheckPath: /
+      HealthCheckProtocol: HTTP
+
+  Al2027X86TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub '${AppName}-al2027-x86-tg'
+      VpcId: !Ref VpcId
+      Protocol: HTTP
+      Port: 80
+      TargetType: instance
+      HealthCheckPath: /
+      HealthCheckProtocol: HTTP
+
+  Al2027Arm64TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub '${AppName}-al2027-arm64-tg'
+      VpcId: !Ref VpcId
+      Protocol: HTTP
+      Port: 80
+      TargetType: instance
+      HealthCheckPath: /
+      HealthCheckProtocol: HTTP
+
+  Listener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref LoadBalancer
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref Al2023X86TargetGroup
+
+  Al2023Arm64ListenerRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      ListenerArn: !Ref Listener
+      Priority: 10
+      Conditions:
+        - Field: path-pattern
+          Values: [ '/al2023-arm64*' ]
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref Al2023Arm64TargetGroup
+
+  Al2027X86ListenerRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      ListenerArn: !Ref Listener
+      Priority: 20
+      Conditions:
+        - Field: path-pattern
+          Values: [ '/al2027-arm64*' ]
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref Al2027Arm64TargetGroup
+
+  Al2027Arm64ListenerRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      ListenerArn: !Ref Listener
+      Priority: 30
+      Conditions:
+        - Field: path-pattern
+          Values: [ '/al2027*' ]
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref Al2027X86TargetGroup
+
+  # ---------- Launch templates ----------
+  Al2023X86LaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateName: !Sub '${AppName}-al2023-x86-lt'
+      LaunchTemplateData:
+        ImageId: !Ref Al2023X86AmiId
+        InstanceType: !Ref X86InstanceType
+        IamInstanceProfile: { Arn: !GetAtt InstanceProfile.Arn }
+        SecurityGroupIds: [ !Ref InstanceSecurityGroup ]
+        TagSpecifications:
+          - ResourceType: instance
+            Tags:
+              - Key: Name
+                Value: !Sub '${AppName}-al2023-x86'
+        UserData:
+          Fn::Base64: !Sub |
+            #!/bin/bash
+            set -euxo pipefail
+            dnf -y install ruby wget
+            cd /tmp
+            wget https://aws-codedeploy-${AWS::Region}.s3.${AWS::Region}.amazonaws.com/latest/install
+            chmod +x ./install
+            ./install auto
+            systemctl enable --now codedeploy-agent
+
+  Al2023Arm64LaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateName: !Sub '${AppName}-al2023-arm64-lt'
+      LaunchTemplateData:
+        ImageId: !Ref Al2023Arm64AmiId
+        InstanceType: !Ref Arm64InstanceType
+        IamInstanceProfile: { Arn: !GetAtt InstanceProfile.Arn }
+        SecurityGroupIds: [ !Ref InstanceSecurityGroup ]
+        TagSpecifications:
+          - ResourceType: instance
+            Tags:
+              - Key: Name
+                Value: !Sub '${AppName}-al2023-arm64'
+        UserData:
+          Fn::Base64: !Sub |
+            #!/bin/bash
+            set -euxo pipefail
+            dnf -y install ruby wget
+            cd /tmp
+            wget https://aws-codedeploy-${AWS::Region}.s3.${AWS::Region}.amazonaws.com/latest/install
+            chmod +x ./install
+            ./install auto
+            systemctl enable --now codedeploy-agent
+
+  Al2027X86LaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateName: !Sub '${AppName}-al2027-x86-lt'
+      LaunchTemplateData:
+        ImageId: !Ref Al2027X86AmiId
+        InstanceType: !Ref X86InstanceType
+        IamInstanceProfile: { Arn: !GetAtt InstanceProfile.Arn }
+        SecurityGroupIds: [ !Ref InstanceSecurityGroup ]
+        TagSpecifications:
+          - ResourceType: instance
+            Tags:
+              - Key: Name
+                Value: !Sub '${AppName}-al2027-x86'
+        UserData:
+          Fn::Base64: !Sub |
+            #!/bin/bash
+            set -euxo pipefail
+            dnf -y install ruby wget
+            cd /tmp
+            wget https://aws-codedeploy-${AWS::Region}.s3.${AWS::Region}.amazonaws.com/latest/install
+            chmod +x ./install
+            ./install auto
+            systemctl enable --now codedeploy-agent
+
+  Al2027Arm64LaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateName: !Sub '${AppName}-al2027-arm64-lt'
+      LaunchTemplateData:
+        ImageId: !Ref Al2027Arm64AmiId
+        InstanceType: !Ref Arm64InstanceType
+        IamInstanceProfile: { Arn: !GetAtt InstanceProfile.Arn }
+        SecurityGroupIds: [ !Ref InstanceSecurityGroup ]
+        TagSpecifications:
+          - ResourceType: instance
+            Tags:
+              - Key: Name
+                Value: !Sub '${AppName}-al2027-arm64'
+        UserData:
+          Fn::Base64: !Sub |
+            #!/bin/bash
+            set -euxo pipefail
+            dnf -y install ruby wget
+            cd /tmp
+            wget https://aws-codedeploy-${AWS::Region}.s3.${AWS::Region}.amazonaws.com/latest/install
+            chmod +x ./install
+            ./install auto
+            systemctl enable --now codedeploy-agent
+
+  # ---------- Auto Scaling Groups ----------
+  Al2023X86Asg:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      AutoScalingGroupName: !Sub '${AppName}-al2023-x86-asg'
+      VPCZoneIdentifier: !Ref SubnetIds
+      LaunchTemplate:
+        LaunchTemplateId: !Ref Al2023X86LaunchTemplate
+        Version: !GetAtt Al2023X86LaunchTemplate.LatestVersionNumber
+      MinSize: '1'
+      MaxSize: '2'
+      DesiredCapacity: '1'
+      TargetGroupARNs: [ !Ref Al2023X86TargetGroup ]
+      HealthCheckType: EC2
+      Tags:
+        - Key: Name
+          Value: !Sub '${AppName}-al2023-x86'
+          PropagateAtLaunch: true
+
+  Al2023Arm64Asg:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      AutoScalingGroupName: !Sub '${AppName}-al2023-arm64-asg'
+      VPCZoneIdentifier: !Ref SubnetIds
+      LaunchTemplate:
+        LaunchTemplateId: !Ref Al2023Arm64LaunchTemplate
+        Version: !GetAtt Al2023Arm64LaunchTemplate.LatestVersionNumber
+      MinSize: '1'
+      MaxSize: '2'
+      DesiredCapacity: '1'
+      TargetGroupARNs: [ !Ref Al2023Arm64TargetGroup ]
+      HealthCheckType: EC2
+      Tags:
+        - Key: Name
+          Value: !Sub '${AppName}-al2023-arm64'
+          PropagateAtLaunch: true
+
+  Al2027X86Asg:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      AutoScalingGroupName: !Sub '${AppName}-al2027-x86-asg'
+      VPCZoneIdentifier: !Ref SubnetIds
+      LaunchTemplate:
+        LaunchTemplateId: !Ref Al2027X86LaunchTemplate
+        Version: !GetAtt Al2027X86LaunchTemplate.LatestVersionNumber
+      MinSize: '1'
+      MaxSize: '2'
+      DesiredCapacity: '1'
+      TargetGroupARNs: [ !Ref Al2027X86TargetGroup ]
+      HealthCheckType: EC2
+      Tags:
+        - Key: Name
+          Value: !Sub '${AppName}-al2027-x86'
+          PropagateAtLaunch: true
+
+  Al2027Arm64Asg:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      AutoScalingGroupName: !Sub '${AppName}-al2027-arm64-asg'
+      VPCZoneIdentifier: !Ref SubnetIds
+      LaunchTemplate:
+        LaunchTemplateId: !Ref Al2027Arm64LaunchTemplate
+        Version: !GetAtt Al2027Arm64LaunchTemplate.LatestVersionNumber
+      MinSize: '1'
+      MaxSize: '2'
+      DesiredCapacity: '1'
+      TargetGroupARNs: [ !Ref Al2027Arm64TargetGroup ]
+      HealthCheckType: EC2
+      Tags:
+        - Key: Name
+          Value: !Sub '${AppName}-al2027-arm64'
+          PropagateAtLaunch: true
+
+Outputs:
+  AlbDnsName:
+    Description: Public DNS name of the ALB (test the app here).
+    Value: !GetAtt LoadBalancer.DNSName
+  AlbListenerArn:
+    Value: !Ref Listener
+
+  Al2023X86AsgName:
+    Value: !Ref Al2023X86Asg
+  Al2023Arm64AsgName:
+    Value: !Ref Al2023Arm64Asg
+  Al2027X86AsgName:
+    Value: !Ref Al2027X86Asg
+  Al2027Arm64AsgName:
+    Value: !Ref Al2027Arm64Asg
+
+  Al2023X86TargetGroupArn:
+    Value: !Ref Al2023X86TargetGroup
+  Al2023Arm64TargetGroupArn:
+    Value: !Ref Al2023Arm64TargetGroup
+  Al2027X86TargetGroupArn:
+    Value: !Ref Al2027X86TargetGroup
+  Al2027Arm64TargetGroupArn:
+    Value: !Ref Al2027Arm64TargetGroup
