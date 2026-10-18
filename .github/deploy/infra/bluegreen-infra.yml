@@ -64,6 +64,14 @@ Parameters:
     Type: String
     Default: amazon-ec2-net-utils
 
+  NamePrefix:
+    Type: String
+    Default: a-e-n-u
+    Description: >
+      Short prefix used ONLY for ELB target group names, which AWS caps at 32
+      characters. Keep it short: longest suffix is "-al2023-arm64-tg" (16 chars),
+      so this must stay <= 16 chars.
+
 Resources:
 
   # ---------- Security groups ----------
@@ -131,7 +139,7 @@ Resources:
   Al2023X86TargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
     Properties:
-      Name: !Sub '${AppName}-al2023-x86-tg'
+      Name: !Sub '${NamePrefix}-al2023-x86-tg'
       VpcId: !Ref VpcId
       Protocol: HTTP
       Port: 80
@@ -142,7 +150,7 @@ Resources:
   Al2023Arm64TargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
     Properties:
-      Name: !Sub '${AppName}-al2023-arm64-tg'
+      Name: !Sub '${NamePrefix}-al2023-arm64-tg'
       VpcId: !Ref VpcId
       Protocol: HTTP
       Port: 80
@@ -153,7 +161,7 @@ Resources:
   Al2027X86TargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
     Properties:
-      Name: !Sub '${AppName}-al2027-x86-tg'
+      Name: !Sub '${NamePrefix}-al2027-x86-tg'
       VpcId: !Ref VpcId
       Protocol: HTTP
       Port: 80
@@ -164,7 +172,7 @@ Resources:
   Al2027Arm64TargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
     Properties:
-      Name: !Sub '${AppName}-al2027-arm64-tg'
+      Name: !Sub '${NamePrefix}-al2027-arm64-tg'
       VpcId: !Ref VpcId
       Protocol: HTTP
       Port: 80
