@@ -245,7 +245,13 @@ Resources:
           Fn::Base64: !Sub |
             #!/bin/bash
             set -euxo pipefail
-            dnf -y install ruby wget
+            dnf -y install ruby wget httpd
+            # Tiny web server so the ALB health check (GET / on :80) passes.
+            # The RPM itself serves nothing. FallbackResource makes the
+            # path-routed URLs (/al2023-arm64, /al2027, ...) return the same page.
+            echo 'FallbackResource /index.html' > /etc/httpd/conf.d/healthcheck.conf
+            echo 'OK - no CodeDeploy revision yet' > /var/www/html/index.html
+            systemctl enable --now httpd
             cd /tmp
             wget https://aws-codedeploy-${AWS::Region}.s3.${AWS::Region}.amazonaws.com/latest/install
             chmod +x ./install
@@ -270,7 +276,13 @@ Resources:
           Fn::Base64: !Sub |
             #!/bin/bash
             set -euxo pipefail
-            dnf -y install ruby wget
+            dnf -y install ruby wget httpd
+            # Tiny web server so the ALB health check (GET / on :80) passes.
+            # The RPM itself serves nothing. FallbackResource makes the
+            # path-routed URLs (/al2023-arm64, /al2027, ...) return the same page.
+            echo 'FallbackResource /index.html' > /etc/httpd/conf.d/healthcheck.conf
+            echo 'OK - no CodeDeploy revision yet' > /var/www/html/index.html
+            systemctl enable --now httpd
             cd /tmp
             wget https://aws-codedeploy-${AWS::Region}.s3.${AWS::Region}.amazonaws.com/latest/install
             chmod +x ./install
@@ -295,7 +307,13 @@ Resources:
           Fn::Base64: !Sub |
             #!/bin/bash
             set -euxo pipefail
-            dnf -y install ruby wget
+            dnf -y install ruby wget httpd
+            # Tiny web server so the ALB health check (GET / on :80) passes.
+            # The RPM itself serves nothing. FallbackResource makes the
+            # path-routed URLs (/al2023-arm64, /al2027, ...) return the same page.
+            echo 'FallbackResource /index.html' > /etc/httpd/conf.d/healthcheck.conf
+            echo 'OK - no CodeDeploy revision yet' > /var/www/html/index.html
+            systemctl enable --now httpd
             cd /tmp
             wget https://aws-codedeploy-${AWS::Region}.s3.${AWS::Region}.amazonaws.com/latest/install
             chmod +x ./install
@@ -320,7 +338,13 @@ Resources:
           Fn::Base64: !Sub |
             #!/bin/bash
             set -euxo pipefail
-            dnf -y install ruby wget
+            dnf -y install ruby wget httpd
+            # Tiny web server so the ALB health check (GET / on :80) passes.
+            # The RPM itself serves nothing. FallbackResource makes the
+            # path-routed URLs (/al2023-arm64, /al2027, ...) return the same page.
+            echo 'FallbackResource /index.html' > /etc/httpd/conf.d/healthcheck.conf
+            echo 'OK - no CodeDeploy revision yet' > /var/www/html/index.html
+            systemctl enable --now httpd
             cd /tmp
             wget https://aws-codedeploy-${AWS::Region}.s3.${AWS::Region}.amazonaws.com/latest/install
             chmod +x ./install
@@ -335,7 +359,9 @@ Resources:
       VPCZoneIdentifier: !Ref SubnetIds
       LaunchTemplate:
         LaunchTemplateId: !Ref Al2023X86LaunchTemplate
-        Version: !GetAtt Al2023X86LaunchTemplate.LatestVersionNumber
+        # $Latest (not a pinned number) so the ASG copies CodeDeploy makes
+        # always pick up the newest launch template version.
+        Version: '$Latest'
       MinSize: '1'
       MaxSize: '2'
       DesiredCapacity: '1'
@@ -353,7 +379,7 @@ Resources:
       VPCZoneIdentifier: !Ref SubnetIds
       LaunchTemplate:
         LaunchTemplateId: !Ref Al2023Arm64LaunchTemplate
-        Version: !GetAtt Al2023Arm64LaunchTemplate.LatestVersionNumber
+        Version: '$Latest'
       MinSize: '1'
       MaxSize: '2'
       DesiredCapacity: '1'
@@ -371,7 +397,7 @@ Resources:
       VPCZoneIdentifier: !Ref SubnetIds
       LaunchTemplate:
         LaunchTemplateId: !Ref Al2027X86LaunchTemplate
-        Version: !GetAtt Al2027X86LaunchTemplate.LatestVersionNumber
+        Version: '$Latest'
       MinSize: '1'
       MaxSize: '2'
       DesiredCapacity: '1'
@@ -389,7 +415,7 @@ Resources:
       VPCZoneIdentifier: !Ref SubnetIds
       LaunchTemplate:
         LaunchTemplateId: !Ref Al2027Arm64LaunchTemplate
-        Version: !GetAtt Al2027Arm64LaunchTemplate.LatestVersionNumber
+        Version: '$Latest'
       MinSize: '1'
       MaxSize: '2'
       DesiredCapacity: '1'
