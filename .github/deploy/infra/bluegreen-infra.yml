@@ -359,9 +359,8 @@ Resources:
       VPCZoneIdentifier: !Ref SubnetIds
       LaunchTemplate:
         LaunchTemplateId: !Ref Al2023X86LaunchTemplate
-        # $Latest (not a pinned number) so the ASG copies CodeDeploy makes
-        # always pick up the newest launch template version.
-        Version: '$Latest'
+        # CloudFormation rejects $Latest/$Default here; must be a number.
+        Version: !GetAtt Al2023X86LaunchTemplate.LatestVersionNumber
       MinSize: '1'
       MaxSize: '2'
       DesiredCapacity: '1'
@@ -379,7 +378,7 @@ Resources:
       VPCZoneIdentifier: !Ref SubnetIds
       LaunchTemplate:
         LaunchTemplateId: !Ref Al2023Arm64LaunchTemplate
-        Version: '$Latest'
+        Version: !GetAtt Al2023Arm64LaunchTemplate.LatestVersionNumber
       MinSize: '1'
       MaxSize: '2'
       DesiredCapacity: '1'
@@ -397,7 +396,7 @@ Resources:
       VPCZoneIdentifier: !Ref SubnetIds
       LaunchTemplate:
         LaunchTemplateId: !Ref Al2027X86LaunchTemplate
-        Version: '$Latest'
+        Version: !GetAtt Al2027X86LaunchTemplate.LatestVersionNumber
       MinSize: '1'
       MaxSize: '2'
       DesiredCapacity: '1'
@@ -415,7 +414,7 @@ Resources:
       VPCZoneIdentifier: !Ref SubnetIds
       LaunchTemplate:
         LaunchTemplateId: !Ref Al2027Arm64LaunchTemplate
-        Version: '$Latest'
+        Version: !GetAtt Al2027Arm64LaunchTemplate.LatestVersionNumber
       MinSize: '1'
       MaxSize: '2'
       DesiredCapacity: '1'
